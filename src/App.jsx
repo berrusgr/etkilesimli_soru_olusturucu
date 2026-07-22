@@ -39,17 +39,15 @@ const fileToBase64 = (file) => new Promise((resolve, reject) => {
 const getApiKey = () => {
   const envKey = import.meta.env.VITE_GEMINI_API_KEY;
   if (envKey && envKey.trim() !== '') return envKey;
-  const storedKey = localStorage.getItem('GEMINI_API_KEY');
-  if (storedKey && storedKey.trim() !== '') return storedKey;
   return "";
 };
 
 const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-const analyzeImageWithAI = async (base64Image, questionType, customKey = '') => {
-  const apiKey = customKey || getApiKey();
+const analyzeImageWithAI = async (base64Image, questionType) => {
+  const apiKey = getApiKey();
   if (!apiKey || apiKey.trim() === '') {
-    throw new Error("Gemini API Key bulunamadı! Lütfen üst menüdeki 'API Key Ayarla' butonundan veya GitHub Secrets üzerinden anahtarınızı ekleyin.");
+    throw new Error("Gemini API Key bulunamadı. Lütfen GitHub Secrets üzerinden GEMINI_API_KEY tanımlandığından emin olun.");
   }
 
   const mimeTypeMatch = base64Image.match(/data:(.*?);/);
@@ -76,7 +74,7 @@ const analyzeImageWithAI = async (base64Image, questionType, customKey = '') => 
 
   while (attempt < maxAttempts) {
     try {
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -91,7 +89,10 @@ const analyzeImageWithAI = async (base64Image, questionType, customKey = '') => 
         })
       });
 
-      if (!response.ok) throw new Error('API Hatası');
+      if (!response.ok) {
+        const errorBody = await response.text();
+        throw new Error(`API Hatası (${response.status}): ${errorBody}`);
+      }
       
       const result = await response.json();
       const textResult = result.candidates?.[0]?.content?.parts?.[0]?.text;
@@ -101,7 +102,7 @@ const analyzeImageWithAI = async (base64Image, questionType, customKey = '') => 
     } catch (error) {
       attempt++;
       if (attempt >= maxAttempts) {
-        throw new Error("Yapay zeka analizi başarısız oldu. Lütfen tekrar deneyin.");
+        throw error;
       }
       await wait(delays[attempt - 1]);
     }
@@ -577,7 +578,7 @@ export default function App() {
     setStep('analyzing');
     setError('');
     try {
-      const data = await analyzeImageWithAI(image, questionType, inputKey);
+      const data = await analyzeImageWithAI(image, questionType);
       setQuestionData(data);
       setStep('editor');
     } catch (err) {
@@ -835,33 +836,17 @@ export default function App() {
     <div className="min-h-screen font-sans" style={{ backgroundColor: COLORS.bg, color: COLORS.textNormal }}>
       <header className="bg-white border-b border-gray-200 px-8 py-4 flex items-center justify-between sticky top-0 z-10 shadow-sm">
         <h1 className="text-xl font-bold tracking-tight" style={{ color: COLORS.title }}>Etkileşimli Soru Oluşturucu</h1>
-        <div className="flex items-center gap-3">
-          <button 
-            onClick={() => setShowKeyModal(true)} 
-            className="text-xs font-semibold px-3 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg transition-colors border border-gray-200"
-          >
-            🔑 API Key {getApiKey() ? '🔑 (Kayıtlı)' : 'Ayarla'}
-          </button>
-          <div className="text-sm font-medium px-3 py-1 bg-blue-50 text-blue-700 rounded-full">Pro Sürüm</div>
-        </div>
+        <div className="text-sm font-medium px-3 py-1 bg-blue-50 text-blue-700 rounded-full">Pro Sürüm</div>
       </header>
 
       <main className="max-w-4xl mx-auto py-10 px-4 sm:px-6">
         {error && (
-          <div className="mb-6 bg-red-50 border-l-4 border-red-500 p-4 flex justify-between items-center">
-            <div className="flex items-start">
-              <div className="text-red-500 mt-0.5 mr-3"><Icons.Error /></div>
-              <div>
-                <h3 className="text-sm font-bold text-red-800">Hata</h3>
-                <p className="text-sm text-red-700 mt-1">{error}</p>
-              </div>
+          <div className="mb-6 bg-red-50 border-l-4 border-red-500 p-4 flex items-start">
+            <div className="text-red-500 mt-0.5 mr-3"><Icons.Error /></div>
+            <div>
+              <h3 className="text-sm font-bold text-red-800">Hata</h3>
+              <p className="text-sm text-red-700 mt-1">{error}</p>
             </div>
-            <button 
-              onClick={() => setShowKeyModal(true)} 
-              className="bg-red-600 hover:bg-red-700 text-white text-xs px-3 py-2 rounded-md font-medium whitespace-nowrap ml-4"
-            >
-              API Key Gir
-            </button>
           </div>
         )}
 
@@ -870,39 +855,6 @@ export default function App() {
         {step === 'analyzing' && renderAnalyzing()}
         {step === 'editor' && renderEditor()}
       </main>
-
-      {/* API Key Modal */}
-      {showKeyModal && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl max-w-md w-full p-6 shadow-xl border border-gray-100">
-            <h3 className="text-lg font-bold text-gray-900 mb-2">Gemini API Key Tanımla</h3>
-            <p className="text-sm text-gray-500 mb-4">
-              Görsel analizi yapabilmek için Gemini API anahtarınızı aşağıdaki alana yapıştırabilirsiniz. Anahtar sadece tarayıcınızda (local storage) saklanır.
-            </p>
-            <input 
-              type="password" 
-              placeholder="AIzaSy..." 
-              value={inputKey} 
-              onChange={e => setInputKey(e.target.value)}
-              className="w-full p-3 border border-gray-300 rounded-lg text-sm mb-4 focus:ring-2 focus:ring-blue-500 focus:outline-none"
-            />
-            <div className="flex justify-end gap-2">
-              <button 
-                onClick={() => setShowKeyModal(false)}
-                className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800 font-medium"
-              >
-                Kapat
-              </button>
-              <button 
-                onClick={handleSaveKey}
-                className="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg"
-              >
-                Kaydet
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
