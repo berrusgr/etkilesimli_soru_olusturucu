@@ -68,13 +68,12 @@ const analyzeImageWithAI = async (base64Image, questionType) => {
   
   Sadece geçerli, parse edilebilir JSON döndür. Markdown blokları kullanma.`;
 
-  let attempt = 0;
-  const maxAttempts = 5;
-  const delays = [1000, 2000, 4000, 8000, 16000];
+  const models = ['gemini-2.0-flash', 'gemini-1.5-flash-8b', 'gemini-2.0-flash-lite'];
+  let lastError = null;
 
-  while (attempt < maxAttempts) {
+  for (const model of models) {
     try {
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`, {
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -91,6 +90,12 @@ const analyzeImageWithAI = async (base64Image, questionType) => {
 
       if (!response.ok) {
         const errorBody = await response.text();
+        // Limit hatası (429) durumunda diğer modele geç
+        if (response.status === 429) {
+          console.warn(`Model ${model} limit aşıldı, sonraki model deneniyor...`);
+          lastError = new Error(`Dakikalık istek limitiniz aşıldı (${model}). Lütfen 30-40 saniye sonra tekrar deneyin.`);
+          continue;
+        }
         throw new Error(`API Hatası (${response.status}): ${errorBody}`);
       }
       
@@ -100,13 +105,11 @@ const analyzeImageWithAI = async (base64Image, questionType) => {
       
       return JSON.parse(textResult);
     } catch (error) {
-      attempt++;
-      if (attempt >= maxAttempts) {
-        throw error;
-      }
-      await wait(delays[attempt - 1]);
+      lastError = error;
     }
   }
+
+  throw lastError || new Error("Yapay zeka analizi başarısız oldu.");
 };
 
 // --- HTML GENERATOR MOTORU (ÇEVRİMDIŞI ÇIKTI) ---
